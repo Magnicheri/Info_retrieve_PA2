@@ -62,12 +62,10 @@ class Indexer:
         avg_dl = 0
         for docid, d in enumerate(tqdm(self.docs)):
             avg_dl += len(d)
-            df_inc = False
             for i in d:
                 if i in self.postings_lists:
-                    if not df_inc:
+                    if docid not in self.postings_lists[i][1]:
                         self.postings_lists[i][0] += 1
-                        df_inc= True
                     self.postings_lists[i][1].append(docid)
                 else:
                     self.postings_lists[i] = [1,[docid]]
@@ -106,7 +104,7 @@ class SearchAgent:
             for t in q_idx:
                 if t in self.i.tok2idx:
                     index = self.i.tok2idx[t]
-                    df = len(self.i.postings_lists[index][1])
+                    df = self.i.postings_lists[index][0]
                     tf = self.i.postings_lists[index][1]
                     avgdl = self.i.corpus_stats
                     for l in tf:
