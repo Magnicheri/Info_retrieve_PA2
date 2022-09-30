@@ -10,27 +10,23 @@ import math
 #nltk.download('stopwords')
 #nltk.download('averaged_perceptron_tagger')
 import stopwords as stopwords
-
 from tqdm import tqdm
-from nltk import pos_tag, WhitespaceTokenizer
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from datasets import load_dataset
 
 class Indexer:
-    global dbfile
-    dbfile = "C:\\Users\\pmagn\\PycharmProjects\\BMI25_scoreIR\\dbfile.pkl"
-
     def __init__(self):
+        self.dbfile = "./ir.idx"
         self.tok2idx = defaultdict(lambda: len(self.tok2idx))
         self.idx2tok = dict()
         self.postings_lists = dict()
         self.docs = []
         self.raw_ds = []
         self.corpus_stats = 0
-        if os.path.exists(dbfile):
-            with open('dbfile.pkl', 'rb') as file:
+        if os.path.exists(self.dbfile):
+            with open(self.dbfile, 'rb') as file:
                 ds = pickle.load(file)
             self.tok2idx = ds['tok2idx']
             self.idx2tok = ds['idx2tok']
@@ -63,18 +59,19 @@ class Indexer:
             self.docs.append(encoded_doc)
 
     def create_postings_lists(self):
-
-        for docid, d in enumerate(self.docs):
-            self.corpus_stats += len(d)
-            global count
-            count = 0
+        avg_dl = 0
+        for docid, d in enumerate(tqdm(self.docs)):
+            avg_dl += len(d)
+            df_inc = False
             for i in d:
                 if i in self.postings_lists:
-                    self.postings_lists[i][0] += 1
+                    if not df_inc:
+                        self.postings_lists[i][0] += 1
+                        df_inc= True
                     self.postings_lists[i][1].append(docid)
                 else:
                     self.postings_lists[i] = [1,[docid]]
-        self.corpus_stats /= len(self.raw_ds)
+        self.corpus_stats = avg_dl/ len(self.raw_ds)
         print('Finalizing posting lists....')
         for k in tqdm(self.postings_lists):
             self.postings_lists[k][1] = Counter(self.postings_lists[k][1])
@@ -86,22 +83,18 @@ class Indexer:
                 'raw_ds' : self.raw_ds,
                 'postings' : self.postings_lists
         }
-        pickle.dump(index, open('dbfile.pkl', 'wb'))
+        pickle.dump(index, open(self.dbfile, 'wb'))
 
 class SearchAgent:
-
         k1 = 1.5                # BM25 parameter k1 for tf saturation
         b = 0.75                # BM25 parameter b for document length normalization
-
         def __init__(self, indexer):
             self.doc_id = []
             self.score = []
             self.doc_scores = []
             self.i = indexer
 
-
         def query(self, q_str):
-            bmi25 = 0
             tokenizer = RegexpTokenizer(r"\w+")
             lemmatizer = WordNetLemmatizer()
             stop_words = stopwords.words('english')
@@ -113,35 +106,30 @@ class SearchAgent:
             for t in q_idx:
                 if t in self.i.tok2idx:
                     index = self.i.tok2idx[t]
-                    df = self.i.postings_lists[index][0]
+                    df = len(self.i.postings_lists[index][1])
                     tf = self.i.postings_lists[index][1]
                     avgdl = self.i.corpus_stats
-                    for t in tf:
-                        dl = len(self.i.raw_ds[t])
-                        if t not in self.doc_id:
-                            self.doc_id.append(t)
-                            tfi = tf[t]
-                            real_dl = abs(dl)/avgdl
-                            bmi25 = ((math.log2(((len(self.i.docs) - df + .5) / (df + .5))+1))) * (((self.k1 + 1) * tfi ) / ((self.k1 * ((1 - self.b) + self.b * real_dl))+tfi ))
+                    for l in tf:
+                        dl = len(self.i.docs[l])
+                        real_dl = dl/avgdl
+                        tfi = tf[l]
+                        if l not in self.doc_id:
+                            self.doc_id.append(l)
+                            bmi25 = math.log2(len(self.i.docs)/df) * (((self.k1 + 1) * tfi ) / ((self.k1 * (1 - self.b + self.b * real_dl))+tfi ))
                             self.score.append(bmi25)
                         else:
-                            idx = self.doc_id.index(t)
-                            tfi = tf[t]
-                            real_dl = abs(dl) / avgdl
-                            bmi25 = ((math.log2((len(self.i.docs) - df + .5) / (df + .5))+1)) * (((self.k1 + 1) * tfi ) / ((self.k1 * (((1 - self.b) + self.b) * real_dl))+tfi))
-                            self.score[idx] += bmi25
+                            idx = self.doc_id.index(l)
+                            bmi25 = math.log2(len(self.i.docs) / df) * (((self.k1 + 1) * tfi) / ((self.k1 * (1 - self.b + self.b * real_dl)) + tfi))
+                            self.score[idx] = self.score[idx] + bmi25
             self.doc_scores = list(zip(self.score,self.doc_id))
             self.doc_scores.sort(reverse=True)
-            results = {
-                tuple(self.doc_scores)
-            }
-            if len(results) == 0:
+
+            if len(self.doc_scores) == 0:
                 return None
             else:
-                self.display_results(results)
+                self.display_results()
 
-
-        def display_results(self, results):
+        def display_results(self):
         # Decode
             for docid_score in self.doc_scores[0:5]:  # print top 5 results
                 print(f'\nDocID: {docid_score[1]}')
@@ -151,7 +139,6 @@ class SearchAgent:
             self.doc_id.clear()
             self.score.clear()
             self.doc_scores.clear()
-
 
 if __name__ == "__main__":
     i = Indexer()
